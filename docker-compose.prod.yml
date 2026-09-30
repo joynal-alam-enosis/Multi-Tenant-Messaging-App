@@ -1,0 +1,201 @@
+# Production Docker Compose
+# Usage: docker compose -f docker-compose.prod.yml up -d --build
+#
+# Production deployment with:
+# - Frontend: Nginx serving static build (multi-stage Dockerfile)
+# - Backend: Django + Daphne (production settings)
+# - Database: PostgreSQL
+# - Cache: Redis
+# - Celery: Background tasks
+# - S3: MiniStack S3 API (or real AWS S3)
+# - Cognito: Real AWS Cognito (not MiniStack)
+
+version: '3.8'
+
+services:
+  # Frontend: Production build served by Nginx
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_API_URL=/api
+      - VITE_WS_URL=/ws
+      - VITE_AWS_ENDPOINT_URL=/aws-cognito
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 32M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Backend: Django + Daphne + Cognito JWT auth
+  backend:
+    build: ./backend
+    command: >
+      sh -c "python manage.py bootstrap_cognito &&
+             python manage.py bootstrap_exports_bucket &&
+             python manage.py migrate &&
+             python manage.py seed || true &&
+             daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://postgres:postgrespassword@db:5432/messaging
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - DEBUG=False
+      - COGNITO_VERIFY_JWT=true
+      - COGNITO_POOL_NAME=messaging-app
+      - COGNITO_CLIENT_NAME=messaging-web
+      - EXPORT_S3_BUCKET=messaging-exports
+      - AWS_ENDPOINT_URL=http://ministack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID:-}
+      - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ministack:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    restart: unless-stopped
+
+  # Celery Worker: Background tasks
+  celery_worker:
+    build: ./backend
+    command: celery -A config worker -l info
+    environment:
+      - DATABASE_URL=postgres://postgres:postgrespassword@db:5432/messaging
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - DEBUG=False
+      - AWS_ENDPOINT_URL=http://ministack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - EXPORT_S3_BUCKET=messaging-exports
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ministack:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    restart: unless-stopped
+
+  # Database: PostgreSQL
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: messaging
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d messaging"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    restart: unless-stopped
+
+  # Redis: Cache + Celery Broker + Channel Layer
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
+    restart: unless-stopped
+
+  # MiniStack: Local AWS emulator for Cognito + S3
+  # In real production, replace with real AWS Cognito + S3
+  ministack:
+    image: ministackorg/ministack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - PERSIST_STATE=1
+      - LOG_LEVEL=INFO
+    volumes:
+      - ministack_state:/tmp/ministack-state
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:4566/_ministack/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.05'
+          memory: 64M
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  ministack_state:

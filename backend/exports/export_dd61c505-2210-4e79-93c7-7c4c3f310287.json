@@ -1,0 +1,82 @@
+{
+  "conversation_id": "8568a57d-a3be-490a-994a-0caa72ed47be",
+  "participants": [
+    "alice@acme.com",
+    "dave@globex.com"
+  ],
+  "exported_at": "2026-09-28T13:20:07.270184+00:00",
+  "messages": [
+    {
+      "sender": "alice@acme.com",
+      "content": "Hi Dave, from Acme!",
+      "timestamp": "2026-09-25T10:00:46.935474+00:00",
+      "is_read": true
+    },
+    {
+      "sender": "dave@globex.com",
+      "content": "Hello Alice, nice to meet you.",
+      "timestamp": "2026-09-25T10:00:46.939725+00:00",
+      "is_read": true
+    },
+    {
+      "sender": "alice@acme.com",
+      "content": "Hello",
+      "timestamp": "2026-09-25T10:08:23.396978+00:00",
+      "is_read": true
+    },
+    {
+      "sender": "dave@globex.com",
+      "content": "Hi Alice, Glad to see, it's working",
+      "timestamp": "2026-09-25T10:09:52.036382+00:00",
+      "is_read": true
+    },
+    {
+      "sender": "dave@globex.com",
+      "content": "Are you there",
+      "timestamp": "2026-09-25T10:10:30.232897+00:00",
+      "is_read": true
+    },
+    {
+      "sender": "alice@acme.com",
+      "content": "yeS",
+      "timestamp": "2026-09-25T10:10:42.039777+00:00",
+      "is_read": true
+    },
+    {
+      "sender": "alice@acme.com",
+      "content": "Working?",
+      "timestamp": "2026-09-25T11:51:27.708242+00:00",
+      "is_read": true
+    },
+    {
+      "sender": "dave@globex.com",
+      "content": "trying again",
+      "timestamp": "2026-09-28T12:51:04.753943+00:00",
+      "is_read": true
+    },
+    {
+      "sender": "alice@acme.com",
+      "content": "working now?",
+      "timestamp": "2026-09-28T12:51:27.909959+00:00",
+      "is_read": true
+    },
+    {
+      "sender": "dave@globex.com",
+      "content": "not really",
+      "timestamp": "2026-09-28T12:52:01.568486+00:00",
+      "is_read": true
+    },
+    {
+      "sender": "alice@acme.com",
+      "content": "working after fix",
+      "timestamp": "2026-09-28T13:06:59.708935+00:00",
+      "is_read": true
+    },
+    {
+      "sender": "dave@globex.com",
+      "content": "seems working",
+      "timestamp": "2026-09-28T13:07:07.767694+00:00",
+      "is_read": true
+    }
+  ]
+}

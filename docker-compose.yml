@@ -1,0 +1,146 @@
+# Development Docker Compose
+# Usage: docker compose up --build (development)
+#        docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build (production)
+
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: messaging
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d messaging"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Local AWS Cognito emulator (User Pools / JWTs) - DEV ONLY
+  # Enable with: docker compose --profile dev up
+  ministack:
+    image: ministackorg/ministack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - PERSIST_STATE=1
+      - LOG_LEVEL=INFO
+    volumes:
+      - ministack_state:/tmp/ministack-state
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:4566/_ministack/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    profiles: ["dev"]
+
+  backend:
+    build: ./backend
+    command: >
+      sh -c "
+        # Wait for ministack to be ready
+        for i in $(seq 1 30); do
+          if wget -q --spider http://ministack:4566/_ministack/health 2>/dev/null; then
+            echo 'Ministack is ready'
+            break
+          fi
+          echo 'Waiting for ministack...'
+          sleep 2
+        done
+        python manage.py bootstrap_cognito &&
+        python manage.py bootstrap_exports_bucket &&
+        python manage.py migrate &&
+        python manage.py seed || true &&
+        daphne -b 0.0.0.0 -p 8000 config.asgi:application
+      "
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://postgres:postgrespassword@db:5432/messaging
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - AWS_ENDPOINT_URL=http://ministack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - COGNITO_POOL_NAME=messaging-app
+      - COGNITO_CLIENT_NAME=messaging-web
+      - COGNITO_VERIFY_JWT=false
+      - EXPORT_S3_BUCKET=messaging-exports
+      - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID:-}
+      - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID:-}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/auth/cognito-config/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  celery_worker:
+    build: ./backend
+    command: celery -A config worker -l info
+    environment:
+      - DATABASE_URL=postgres://postgres:postgrespassword@db:5432/messaging
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - AWS_ENDPOINT_URL=http://ministack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - EXPORT_S3_BUCKET=messaging-exports
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_AWS_ENDPOINT_URL=/aws-cognito
+      - VITE_AWS_REGION=us-east-1
+      - VITE_COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID:-}
+      - VITE_COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID:-}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  ministack_state:
